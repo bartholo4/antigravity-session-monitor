@@ -1,0 +1,18 @@
+{
+  "name": "session-monitor",
+  "displayName": "会话状态监控",
+  "version": "1.0.0",
+  "description": "DSH 风格实时会话遥测控制面板：在右侧面板常驻展示上下文引用百分比、前缀缓存命中率、每秒 Token 速率（tok/s）与步级耗时明细。",
+  "author": {
+    "name": "bartholo4",
+    "url": "https://github.com/bartholo4"
+  },
+  "homepage": "https://github.com/bartholo4/antigravity-session-monitor",
+  "repository": "https://github.com/bartholo4/antigravity-session-monitor",
+  "logo": "assets/logo.svg",
+  "suggestedPrompts": [
+    "打开当前会话的状态监控面板",
+    "查看当前上下文占用与缓存命中率",
+    "分析最近几步的 Token 消耗"
+  ]
+}

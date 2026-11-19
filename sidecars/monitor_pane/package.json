@@ -1,0 +1,6 @@
+{
+  "name": "monitor_pane",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "DSH-style realtime context, cache hit rate, and tok/s telemetry sidecar"
+}

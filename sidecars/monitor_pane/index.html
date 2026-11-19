@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- MANDATORY: Declare support for both light and dark themes early to prevent FOUC -->
+  <meta name="color-scheme" content="light dark">
+  <title>会话状态监控</title>
+  <script src="/preload.js"></script>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <!-- DSH 风格顶部紧凑常驻控制条（复刻会话下方的默认遥测状态栏体验） -->
+    <header class="control-strip" aria-label="会话实时遥测控制栏">
+      <div class="strip-top">
+        <span id="status-pill" class="status-pill" role="status" aria-live="polite">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="status-text">连接中…</span>
+        </span>
+        <span id="model-badge" class="meta-chip" title="当前会话检测到的模型">—</span>
+        <span class="spacer"></span>
+        <label class="compact-select" title="选择监控的会话">
+          <span class="sr-only">监控会话</span>
+          <select id="conv-select" aria-label="选择监控的会话">
+            <option value="">跟随当前会话</option>
+          </select>
+        </label>
+        <label class="compact-select" title="切换上下文窗口容量参考基准">
+          <span class="sr-only">上下文容量上限</span>
+          <select id="cap-select" aria-label="上下文窗口容量基准">
+            <option value="128000">基准: 128k</option>
+            <option value="200000">基准: 200k</option>
+            <option value="1000000" selected>基准: 1M (Gemini)</option>
+            <option value="2000000">基准: 2M</option>
+          </select>
+        </label>
+      </div>
+
+      <!-- 一行式核心速览胶囊（窄侧栏也能一眼看清三大核心状态） -->
+      <div class="strip-pills-row">
+        <div class="quick-pill" title="当前活跃上下文长度 / 所选参考上限">
+          <span class="qp-label">上下文</span>
+          <strong id="qp-ctx" class="qp-val tabular">—</strong>
+        </div>
+        <div class="quick-pill" title="最新模型步的前缀缓存命中率">
+          <span class="qp-label">缓存命中</span>
+          <strong id="qp-cache" class="qp-val tabular">—</strong>
+        </div>
+        <div class="quick-pill" title="最新模型步等效每秒输出 Token 数（含首字等待与思考）">
+          <span class="qp-label">生成速率</span>
+          <strong id="qp-speed" class="qp-val tabular">—</strong>
+        </div>
+      </div>
+    </header>
+
+    <!-- 空状态提示 -->
+    <section id="empty-state" class="empty-card" hidden>
+      <p class="empty-title">等待会话产生首条模型响应…</p>
+      <p class="empty-desc">发送一条消息后，这里会自动实时展示上下文引用百分比、前缀缓存命中率与每秒 Token 速率（<code>tok/s</code>）。</p>
+    </section>
+
+    <!-- 主监控内容区 -->
+    <main id="dashboard" class="dashboard" hidden>
+      <!-- 三大核心 KPI 卡片 -->
+      <section class="kpi-grid" aria-label="核心状态指标">
+        <!-- 1. 上下文引用百分比（环形进度） -->
+        <article class="kpi-card kpi-context">
+          <div class="kpi-head">
+            <span class="kpi-title">上下文引用占比</span>
+            <span id="compact-badge" class="badge badge-neutral">容量充裕</span>
+          </div>
+          <div class="ctx-body">
+            <div class="progress-ring-wrapper">
+              <progress id="ctx-ring" value="0" max="100" aria-label="上下文引用百分比" class="progress-ring"></progress>
+              <div class="progress-ring-content" aria-hidden="true">
+                <span id="ctx-pct-text" class="ring-pct tabular">0.0%</span>
+                <span class="ring-sub">已引用</span>
+              </div>
+            </div>
+            <div class="ctx-details">
+              <div class="ctx-main-num">
+                <span id="ctx-used" class="big-num tabular">0</span>
+                <span class="num-sep">/</span>
+                <span id="ctx-cap" class="cap-num tabular">1.0M</span>
+              </div>
+              <div id="ctx-delta" class="sub-line tabular">较上步 —</div>
+              <div id="ctx-compact-line" class="sub-line tabular">剩余可用 —</div>
+            </div>
+          </div>
+          <!-- 上下文构成比例条（缓存前缀 vs 新增输入 vs 本步输出） -->
+          <div class="comp-section">
+            <div class="comp-bar" aria-hidden="true">
+              <span id="seg-cache" class="comp-seg seg-cache" style="width: 0%"></span>
+              <span id="seg-uncached" class="comp-seg seg-uncached" style="width: 0%"></span>
+              <span id="seg-output" class="comp-seg seg-output" style="width: 0%"></span>
+            </div>
+            <div class="comp-legend tabular">
+              <span><i class="dot dot-cache"></i>缓存读 <b id="leg-cache">0</b></span>
+              <span><i class="dot dot-uncached"></i>新输入 <b id="leg-uncached">0</b></span>
+              <span><i class="dot dot-output"></i>本步输出 <b id="leg-output">0</b></span>
+            </div>
+          </div>
+        </article>
+
+        <!-- 2. 前缀缓存命中率 -->
+        <article class="kpi-card">
+          <div class="kpi-head">
+            <span class="kpi-title">前缀缓存命中率</span>
+            <span id="cache-state-badge" class="badge badge-neutral">—</span>
+          </div>
+          <div class="metric-hero">
+            <span id="cache-hit-val" class="hero-num tabular">—</span>
+            <span class="hero-unit">当前步</span>
+          </div>
+          <progress id="cache-bar" class="meter-bar" value="0" max="100" aria-label="当前步前缀缓存命中率"></progress>
+          <div class="stat-kv-grid tabular">
+            <div class="kv-item">
+              <span class="kv-k">热态累计命中</span>
+              <span id="cache-warm-val" class="kv-v">—</span>
+            </div>
+            <div class="kv-item">
+              <span class="kv-k">全会话累计</span>
+              <span id="cache-cum-val" class="kv-v">—</span>
+            </div>
+            <div class="kv-item">
+              <span class="kv-k">累计缓存读取</span>
+              <span id="cache-total-read" class="kv-v">0</span>
+            </div>
+            <div class="kv-item">
+              <span class="kv-k">未命中 / 重置</span>
+              <span id="cache-miss-info" class="kv-v">0</span>
+            </div>
+          </div>
+        </article>
+
+        <!-- 3. 每秒 Token 数 (tok/s) -->
+        <article class="kpi-card">
+          <div class="kpi-head">
+            <span class="kpi-title">每秒 Token 速率</span>
+            <span id="speed-dur-badge" class="badge badge-neutral">单步耗时 —</span>
+          </div>
+          <div class="metric-hero">
+            <span id="speed-val" class="hero-num tabular">—</span>
+            <span class="hero-unit">tok/s (最新步)</span>
+          </div>
+          <progress id="speed-bar" class="meter-bar meter-speed" value="0" max="200" aria-label="最新步生成速度相对指示"></progress>
+          <div class="stat-kv-grid tabular">
+            <div class="kv-item">
+              <span class="kv-k">会话平均速度</span>
+              <span id="speed-avg-val" class="kv-v">—</span>
+            </div>
+            <div class="kv-item">
+              <span class="kv-k">会话峰值速度</span>
+              <span id="speed-peak-val" class="kv-v">—</span>
+            </div>
+            <div class="kv-item">
+              <span class="kv-k">累计输出 Token</span>
+              <span id="total-out-val" class="kv-v">0</span>
+            </div>
+            <div class="kv-item">
+              <span class="kv-k">对话轮 / 模型步</span>
+              <span id="turn-step-val" class="kv-v">0 / 0</span>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <!-- 趋势曲线卡（DSH 看板同款切换视图） -->
+      <section class="panel-card" aria-label="历史步级趋势">
+        <div class="panel-head">
+          <span class="panel-title">最近步级趋势</span>
+          <div class="seg-tabs" role="tablist" aria-label="趋势维度切换">
+            <button type="button" role="tab" aria-selected="true" data-chart="tps" class="seg-btn active">速度 tok/s</button>
+            <button type="button" role="tab" aria-selected="false" data-chart="context" class="seg-btn">上下文</button>
+            <button type="button" role="tab" aria-selected="false" data-chart="cache" class="seg-btn">缓存率</button>
+          </div>
+        </div>
+        <div id="chart-wrap" class="chart-wrap">
+          <svg id="trend-svg" class="trend-svg" viewBox="0 0 400 96" preserveAspectRatio="none" role="img" aria-label="步级遥测趋势图"></svg>
+          <div id="chart-foot" class="chart-foot tabular"></div>
+        </div>
+      </section>
+
+      <!-- 步级遥测明细表 -->
+      <section class="panel-card" aria-label="步级请求遥测明细">
+        <div class="panel-head">
+          <span class="panel-title">步级请求明细</span>
+          <div class="panel-actions">
+            <button id="copy-compact-btn" type="button" class="ghost-btn" title="复制 /compact 命令以手动压缩上下文">复制 <code>/compact</code></button>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table class="step-table tabular">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>上下文</th>
+                <th>缓存率</th>
+                <th>输出</th>
+                <th>耗时</th>
+                <th>速率</th>
+                <th>动作 / 工具</th>
+              </tr>
+            </thead>
+            <tbody id="step-tbody"></tbody>
+          </table>
+        </div>
+        <p class="footnote">注：速率基于本地日志每步起止时间计算（含首字等待 TTFT 与思考 Token），纯本地只读统计，零网络外发。</p>
+      </section>
+    </main>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

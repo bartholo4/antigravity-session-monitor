@@ -1,0 +1,21 @@
+{
+  "command": "node",
+  "args": ["main.mjs"],
+  "restart_policy": "always",
+  "display_name": "状态监控",
+  "description": "实时展示当前会话的上下文引用百分比、前缀缓存命中率、每秒 Token 速率（tok/s）与步级遥测明细。",
+  "has_web_ui": true,
+  "agent_permissions": {
+    "allows_user_interactions": false
+  },
+  "ui_config": {
+    "display_name": "状态监控",
+    "views": [
+      {
+        "path": "/",
+        "entrypoint": "SIDECAR_UI_ENTRYPOINT_AUX_PANE",
+        "title": "状态监控"
+      }
+    ]
+  }
+}

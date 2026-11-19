@@ -1,0 +1,790 @@
+/*
+ * DSH-inspired realtime session telemetry panel for Antigravity 2.0 Aux Pane.
+ * Respects host CSS variables synced onto :root by preload.js and modern CSS
+ * dark-mode / semantic <progress> / <progress class="progress-ring"> standards.
+ */
+
+@property --value {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+:root {
+  color-scheme: light dark;
+
+  /* Raw light / dark token pairs */
+  --bg-light: #f6f7f9;
+  --bg-dark: #131519;
+  --surface-light: #ffffff;
+  --surface-dark: #1b1e24;
+  --surface-2-light: #eef0f4;
+  --surface-2-dark: #242933;
+  --fg-light: #181b20;
+  --fg-dark: #eceff4;
+  --fg-muted-light: #5e6673;
+  --fg-muted-dark: #949eae;
+  --fg-faint-light: #8c95a4;
+  --fg-faint-dark: #687282;
+  --border-light: rgba(15, 23, 42, 0.09);
+  --border-dark: rgba(255, 255, 255, 0.09);
+
+  --accent-light: #2563eb;
+  --accent-dark: #60a5fa;
+  --emerald-light: #059669;
+  --emerald-dark: #34d399;
+  --amber-light: #d97706;
+  --amber-dark: #fbbf24;
+  --danger-light: #dc2626;
+  --danger-dark: #f87171;
+  --purple-light: #7c3aed;
+  --purple-dark: #a78bfa;
+
+  /* Fallbacks before light-dark() */
+  --sm-bg: var(--background, var(--bg-light));
+  --sm-surface: var(--card, var(--surface-light));
+  --sm-surface-2: var(--secondary, var(--surface-2-light));
+  --sm-fg: var(--foreground, var(--fg-light));
+  --sm-fg-muted: var(--muted-foreground, var(--fg-muted-light));
+  --sm-fg-faint: var(--placeholder, var(--fg-faint-light));
+  --sm-border: var(--border, var(--border-light));
+  --sm-accent: var(--primary, var(--accent-light));
+  --sm-emerald: var(--emerald-light);
+  --sm-amber: var(--amber-light);
+  --sm-danger: var(--danger-light);
+  --sm-purple: var(--purple-light);
+
+  @media (prefers-color-scheme: dark) {
+    --sm-bg: var(--background, var(--bg-dark));
+    --sm-surface: var(--card, var(--surface-dark));
+    --sm-surface-2: var(--secondary, var(--surface-2-dark));
+    --sm-fg: var(--foreground, var(--fg-dark));
+    --sm-fg-muted: var(--muted-foreground, var(--fg-muted-dark));
+    --sm-fg-faint: var(--placeholder, var(--fg-faint-dark));
+    --sm-border: var(--border, var(--border-dark));
+    --sm-accent: var(--primary, var(--accent-dark));
+    --sm-emerald: var(--emerald-dark);
+    --sm-amber: var(--amber-dark);
+    --sm-danger: var(--danger-dark);
+    --sm-purple: var(--purple-dark);
+  }
+
+  @supports (color: light-dark(white, black)) {
+    --sm-bg: var(--background, light-dark(var(--bg-light), var(--bg-dark)));
+    --sm-surface: var(--card, light-dark(var(--surface-light), var(--surface-dark)));
+    --sm-surface-2: var(--secondary, light-dark(var(--surface-2-light), var(--surface-2-dark)));
+    --sm-fg: var(--foreground, light-dark(var(--fg-light), var(--fg-dark)));
+    --sm-fg-muted: var(--muted-foreground, light-dark(var(--fg-muted-light), var(--fg-muted-dark)));
+    --sm-fg-faint: var(--placeholder, light-dark(var(--fg-faint-light), var(--fg-faint-dark)));
+    --sm-border: var(--border, light-dark(var(--border-light), var(--border-dark)));
+    --sm-accent: var(--primary, light-dark(var(--accent-light), var(--accent-dark)));
+    --sm-emerald: light-dark(var(--emerald-light), var(--emerald-dark));
+    --sm-amber: light-dark(var(--amber-light), var(--amber-dark));
+    --sm-danger: light-dark(var(--danger-light), var(--danger-dark));
+    --sm-purple: light-dark(var(--purple-light), var(--purple-dark));
+  }
+
+  --sm-font: var(--font-family, "Google Sans Flex", "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif);
+  --sm-mono: var(--editor-font-family, "Google Sans Code", "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace);
+
+  --scrollbar-thumb: color-mix(in srgb, var(--sm-fg) 26%, transparent);
+  --scrollbar-track: transparent;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  accent-color: var(--sm-accent);
+}
+
+/* Explicit iframe host theme override synced from preload.js --background luminance */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+@supports not (scrollbar-color: auto) {
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--sm-bg);
+  color: var(--sm-fg);
+  font-family: var(--sm-font);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+code {
+  font-family: var(--sm-mono);
+  font-size: 0.92em;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--sm-surface-2);
+}
+
+.shell {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 10px 12px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── Top DSH-style Compact Control Strip ── */
+.control-strip {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--sm-surface);
+  border: 1px solid var(--sm-border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.strip-top {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--sm-surface-2);
+  color: var(--sm-fg);
+  max-width: 240px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--sm-emerald);
+  flex: none;
+}
+
+.status-pill[data-state="working"] .status-dot {
+  background: var(--sm-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sm-accent) 24%, transparent);
+}
+
+.status-pill[data-state="error"] .status-dot {
+  background: var(--sm-danger);
+}
+
+.meta-chip {
+  font-size: 11px;
+  color: var(--sm-fg-muted);
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--sm-border);
+  max-width: 180px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compact-select select {
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--sm-fg);
+  background: var(--sm-surface-2);
+  border: 1px solid var(--sm-border);
+  border-radius: 6px;
+  padding: 2px 6px;
+  max-width: 155px;
+  cursor: pointer;
+}
+
+.compact-select select:focus-visible,
+.ghost-btn:focus-visible,
+.seg-btn:focus-visible {
+  outline: 2px solid var(--sm-accent);
+  outline-offset: 1px;
+}
+
+.strip-pills-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.quick-pill {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--sm-fg) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sm-fg) 6%, transparent);
+  min-width: 0;
+}
+
+.qp-label {
+  font-size: 11px;
+  color: var(--sm-fg-muted);
+  white-space: nowrap;
+}
+
+.qp-val {
+  font-family: var(--sm-mono);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Empty State ── */
+.empty-card {
+  background: var(--sm-surface);
+  border: 1px dashed var(--sm-border);
+  border-radius: 10px;
+  padding: 24px 16px;
+  text-align: center;
+}
+.empty-title {
+  margin: 0 0 6px;
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.empty-desc {
+  margin: 0;
+  color: var(--sm-fg-muted);
+  font-size: 12px;
+}
+
+/* ── Dashboard Grid ── */
+.dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px;
+}
+
+.kpi-card, .panel-card {
+  background: var(--sm-surface);
+  border: 1px solid var(--sm-border);
+  border-radius: 10px;
+  padding: 11px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  contain: layout style;
+}
+
+.kpi-head, .panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.kpi-title, .panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sm-fg-muted);
+  letter-spacing: 0.01em;
+}
+
+.badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 1.5px 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.badge-neutral {
+  background: var(--sm-surface-2);
+  color: var(--sm-fg-muted);
+}
+.badge-good {
+  background: color-mix(in srgb, var(--sm-emerald) 15%, transparent);
+  color: var(--sm-emerald);
+}
+.badge-warn {
+  background: color-mix(in srgb, var(--sm-amber) 16%, transparent);
+  color: var(--sm-amber);
+}
+.badge-danger {
+  background: color-mix(in srgb, var(--sm-danger) 16%, transparent);
+  color: var(--sm-danger);
+}
+
+/* ── 1. Context Progress Ring (Modern Web Guidance `progress-ring`) ── */
+.ctx-body {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.progress-ring-wrapper {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+progress.progress-ring {
+  --size: 74px;
+  --thickness: 8px;
+  --track-color: color-mix(in srgb, var(--sm-fg) 10%, transparent);
+  --fill-color: var(--sm-accent);
+  --value: attr(value type(<number>));
+  appearance: none;
+  width: var(--size);
+  height: var(--size);
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--fill-color) calc(var(--value) * 1%),
+    var(--track-color) 0
+  );
+  background-clip: border-area;
+  border: var(--thickness) solid transparent;
+  background-origin: border-box;
+  transition: --value 0s ease-in-out;
+
+  @media (prefers-reduced-motion: no-preference) {
+    transition-duration: 0.4s;
+  }
+
+  @media (forced-colors: active) {
+    forced-color-adjust: none;
+    --fill-color: CanvasText;
+    --track-color: Canvas;
+  }
+}
+
+@supports not (background-clip: border-area) {
+  progress.progress-ring {
+    mask-image: radial-gradient(
+      transparent calc(50% - var(--thickness)),
+      black calc(50% - var(--thickness) + 0.5px)
+    );
+    border: 0;
+  }
+}
+
+progress.progress-ring::-webkit-progress-bar {
+  display: none;
+  background: none;
+}
+progress.progress-ring::-webkit-progress-value {
+  display: none;
+  background: none;
+}
+progress.progress-ring::-moz-progress-bar {
+  display: none;
+  background: none;
+}
+progress.progress-ring::slider-fill {
+  display: none;
+  background: none;
+}
+
+progress.progress-ring[data-level="warn"] {
+  --fill-color: var(--sm-amber);
+}
+progress.progress-ring[data-level="danger"] {
+  --fill-color: var(--sm-danger);
+}
+
+.progress-ring-content {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.1;
+}
+
+.ring-pct {
+  font-family: var(--sm-mono);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ring-sub {
+  font-size: 9.5px;
+  color: var(--sm-fg-faint);
+  margin-top: 2px;
+}
+
+.ctx-details {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ctx-main-num {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  font-family: var(--sm-mono);
+}
+
+.big-num {
+  font-size: 18px;
+  font-weight: 700;
+}
+.num-sep, .cap-num {
+  font-size: 12px;
+  color: var(--sm-fg-muted);
+}
+
+.sub-line {
+  font-size: 11px;
+  color: var(--sm-fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Stacked composition bar */
+.comp-section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.comp-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sm-fg) 8%, transparent);
+  overflow: clip;
+  display: flex;
+}
+
+.comp-seg {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+.seg-cache { background: var(--sm-emerald); }
+.seg-uncached { background: var(--sm-accent); }
+.seg-output { background: var(--sm-purple); }
+
+.comp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 10.5px;
+  color: var(--sm-fg-muted);
+}
+.comp-legend b {
+  font-family: var(--sm-mono);
+  color: var(--sm-fg);
+  font-weight: 600;
+}
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+.dot-cache { background: var(--sm-emerald); }
+.dot-uncached { background: var(--sm-accent); }
+.dot-output { background: var(--sm-purple); }
+
+/* ── 2 & 3. Hero Number + Styled Native <progress class="meter-bar"> ── */
+.metric-hero {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.hero-num {
+  font-family: var(--sm-mono);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.hero-unit {
+  font-size: 11px;
+  color: var(--sm-fg-muted);
+}
+
+progress.meter-bar {
+  appearance: none;
+  border: 0 solid;
+  overflow: clip;
+  width: 100%;
+  height: 7px;
+  container-type: inline-size;
+  --progress-bar-radius: 1e5px;
+  --progress-bar-track: color-mix(in srgb, var(--sm-fg) 10%, transparent);
+  --progress-bar-fill: var(--sm-emerald);
+  --progress-bar-indeterminate-size: 30%;
+  --progress-bar-indeterminate-animation-duration: 1.5s;
+  border-radius: var(--progress-bar-radius);
+  background: var(--progress-bar-track);
+
+  @media (prefers-reduced-motion: reduce) {
+    --progress-bar-indeterminate-animation-duration: 10s;
+  }
+}
+
+progress.meter-bar.meter-speed {
+  --progress-bar-fill: var(--sm-accent);
+}
+
+progress.meter-bar[data-level="warn"] {
+  --progress-bar-fill: var(--sm-amber);
+}
+progress.meter-bar[data-level="low"] {
+  --progress-bar-fill: var(--sm-danger);
+}
+
+progress.meter-bar:indeterminate {
+  --progress-bar-animation: var(
+    --progress-bar-indeterminate-animation,
+    progress-bar-indeterminate var(--progress-bar-indeterminate-animation-duration) infinite linear
+  );
+}
+
+progress.meter-bar::-webkit-progress-bar {
+  background: transparent;
+}
+
+progress.meter-bar::-webkit-progress-value {
+  background: var(--progress-bar-fill);
+  border-radius: var(--progress-bar-radius);
+  transition: inline-size 0.3s;
+  animation: var(--progress-bar-animation, revert-rule);
+}
+
+progress.meter-bar::-moz-progress-bar {
+  background: var(--progress-bar-fill);
+  border-radius: var(--progress-bar-radius);
+  transition: inline-size 0.3s;
+  animation: var(--progress-bar-animation, revert-rule);
+}
+
+@keyframes progress-bar-indeterminate {
+  from, to {
+    inline-size: var(--progress-bar-indeterminate-size);
+    margin-right: auto;
+  }
+  from { translate: -100%; }
+  to { translate: 100cqi; }
+}
+
+.stat-kv-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+  padding-top: 2px;
+}
+
+.kv-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.kv-k {
+  font-size: 10.5px;
+  color: var(--sm-fg-faint);
+}
+.kv-v {
+  font-family: var(--sm-mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* ── Trend Chart Card ── */
+.seg-tabs {
+  display: inline-flex;
+  background: var(--sm-surface-2);
+  padding: 2px;
+  border-radius: 7px;
+  gap: 2px;
+}
+
+.seg-btn {
+  border: 0;
+  background: transparent;
+  color: var(--sm-fg-muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.seg-btn.active {
+  background: var(--sm-surface);
+  color: var(--sm-fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.chart-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.trend-svg {
+  width: 100%;
+  height: 92px;
+  display: block;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--sm-fg) 3%, transparent);
+}
+
+.chart-foot {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  color: var(--sm-fg-faint);
+  font-family: var(--sm-mono);
+}
+
+/* ── Step Table ── */
+.ghost-btn {
+  border: 1px solid var(--sm-border);
+  background: transparent;
+  color: var(--sm-fg-muted);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.ghost-btn:hover {
+  background: var(--sm-surface-2);
+  color: var(--sm-fg);
+}
+
+.table-scroll {
+  overflow-x: auto;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--sm-border);
+  border-radius: 7px;
+}
+
+.step-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+
+.step-table th,
+.step-table td {
+  padding: 5px 7px;
+  text-align: right;
+  border-bottom: 1px solid var(--sm-border);
+  white-space: nowrap;
+}
+
+.step-table th:first-child,
+.step-table td:first-child {
+  text-align: center;
+  color: var(--sm-fg-faint);
+}
+
+.step-table th:last-child,
+.step-table td:last-child {
+  text-align: left;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.step-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--sm-surface-2);
+  color: var(--sm-fg-muted);
+  font-weight: 600;
+  font-size: 10.5px;
+  z-index: 1;
+}
+
+.step-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.step-table tbody tr:hover {
+  background: color-mix(in srgb, var(--sm-fg) 4%, transparent);
+}
+
+.mono-cell {
+  font-family: var(--sm-mono);
+}
+
+.step-flag {
+  display: inline-block;
+  font-size: 9.5px;
+  padding: 0 4px;
+  border-radius: 4px;
+  margin-left: 4px;
+}
+
+.footnote {
+  margin: 0;
+  font-size: 10.5px;
+  color: var(--sm-fg-faint);
+}
