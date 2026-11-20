@@ -161,40 +161,61 @@ test('end-to-end metrics, recent list, incremental append, and fs.watch long-pol
     },
     {
       step_index: 2,
+      type: 'GENERIC',
+      status: 'DONE',
+      created_at: '2026-11-19T10:00:05.000Z',
+      content: 'read_file result',
+    },
+    {
+      step_index: 3,
       type: 'PLANNER_RESPONSE',
       status: 'DONE',
       created_at: '2026-11-19T10:00:05.000Z',
       input_tokens: 4000,
       cache_read_tokens: 36000,
       output_tokens: 600,
-      tool_calls: [],
+      tool_calls: [{ name: 'write_file', args: { toolSummary: 'Write A' } }],
     },
     {
-      step_index: 3,
+      step_index: 4,
+      type: 'GENERIC',
+      status: 'DONE',
+      created_at: '2026-11-19T10:00:11.000Z',
+      content: 'write_file result',
+    },
+    {
+      step_index: 5,
       type: 'PLANNER_RESPONSE',
       status: 'DONE',
       created_at: '2026-11-19T10:00:11.000Z',
       input_tokens: 2000,
       cache_read_tokens: 18000,
       output_tokens: 300,
-      tool_calls: [],
+      tool_calls: [{ name: 'edit_file', args: { toolSummary: 'Edit B' } }],
     },
     {
-      step_index: 4,
+      step_index: 6,
+      type: 'GENERIC',
+      status: 'DONE',
+      created_at: '2026-11-19T10:00:14.000Z',
+      content: 'edit_file result',
+    },
+    {
+      step_index: 7,
       type: 'PLANNER_RESPONSE',
       status: 'DONE',
       created_at: '2026-11-19T10:00:14.000Z',
       input_tokens: 22000,
       cache_read_tokens: 0,
       output_tokens: 500,
-      tool_calls: [],
+      tool_calls: [{ name: 'run_command', args: { toolSummary: 'Run test' } }],
     },
     {
-      step_index: 5,
+      step_index: 8,
       type: 'GENERIC',
       status: 'DONE',
       created_at: '2026-11-19T10:00:19.000Z',
-      content: 'step closed marker',
+      content: 'run_command result',
     },
   ];
   await writeFile(transcriptFile, `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`, 'utf-8');
@@ -233,7 +254,7 @@ test('end-to-end metrics, recent list, incremental append, and fs.watch long-pol
     assert.equal(m1.model, 'Gemini 4 Pro (High)');
     assert.equal(m1.summary.plannerSteps, 4);
     assert.equal(m1.summary.userTurns, 1);
-    assert.equal(m1.summary.toolCalls, 1);
+    assert.equal(m1.summary.toolCalls, 4);
     assert.equal(m1.summary.compactions, 1);
     assert.equal(m1.summary.cacheResets, 1);
     assert.equal(m1.summary.peakContextTokens, 40000);
@@ -277,6 +298,100 @@ test('end-to-end metrics, recent list, incremental append, and fs.watch long-pol
     assert.equal(m2.current.tps, 120); // 240 / 2s = 120
     assert.equal(m2.summary.peakTps, 120);
     assert.ok(elapsed < 4000, `Expected fs.watch wake-up well before 5000ms timeout, got ${elapsed}ms`);
+  } finally {
+    if (proc) {
+      proc.kill();
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('multi-tool streaming batch measures to last tool and ignores system/user wait gaps', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'agy-session-monitor-batch-'));
+  const execDataDir = join(root, 'sidecar_data', 'session-monitor', 'monitor_pane');
+  const sdkDir = join(root, 'lib', 'node_modules', 'sidecar_sdk');
+  const convId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const logsDir = join(root, 'brain', convId, '.system_generated', 'logs');
+  const transcriptFile = join(logsDir, 'transcript.jsonl');
+
+  await mkdir(execDataDir, { recursive: true });
+  await mkdir(sdkDir, { recursive: true });
+  await mkdir(logsDir, { recursive: true });
+  await writeFile(join(sdkDir, 'index.mjs'), MOCK_SIDECAR_SDK, 'utf-8');
+
+  const lines = [
+    {
+      step_index: 0,
+      type: 'USER_INPUT',
+      status: 'DONE',
+      created_at: '2026-11-20T10:00:00.000Z',
+      content: '<USER_REQUEST>\nBatch write files\n</USER_REQUEST>',
+    },
+    // Multi-tool batch: 4 write_file calls streamed across 40s (first at +5s, last at +40s)
+    // Plus an interleaved SYSTEM_MESSAGE mid-batch that must not close the timer.
+    {
+      step_index: 1,
+      type: 'PLANNER_RESPONSE',
+      status: 'DONE',
+      created_at: '2026-11-20T10:00:00.000Z',
+      input_tokens: 20000,
+      cache_read_tokens: 0,
+      output_tokens: 4000,
+      tool_calls: [
+        { name: 'write_file', args: { toolSummary: 'Write 1' } },
+        { name: 'write_file', args: { toolSummary: 'Write 2' } },
+        { name: 'write_file', args: { toolSummary: 'Write 3' } },
+        { name: 'write_file', args: { toolSummary: 'Write 4' } },
+      ],
+    },
+    { step_index: 2, type: 'GENERIC', status: 'DONE', created_at: '2026-11-20T10:00:05.000Z', content: 'w1' },
+    { step_index: 3, type: 'SYSTEM_MESSAGE', status: 'DONE', created_at: '2026-11-20T10:00:08.000Z', content: 'bg task done' },
+    { step_index: 4, type: 'GENERIC', status: 'DONE', created_at: '2026-11-20T10:00:12.000Z', content: 'w2' },
+    { step_index: 5, type: 'GENERIC', status: 'DONE', created_at: '2026-11-20T10:00:25.000Z', content: 'w3' },
+    { step_index: 6, type: 'GENERIC', status: 'DONE', created_at: '2026-11-20T10:00:40.000Z', content: 'w4' },
+    // Historical direct reply followed 90s later by USER_INPUT: must NOT divide by 90s user wait.
+    {
+      step_index: 7,
+      type: 'PLANNER_RESPONSE',
+      status: 'DONE',
+      created_at: '2026-11-20T10:00:45.000Z',
+      input_tokens: 2000,
+      cache_read_tokens: 22000,
+      output_tokens: 600,
+      tool_calls: [],
+    },
+    {
+      step_index: 8,
+      type: 'USER_INPUT',
+      status: 'DONE',
+      created_at: '2026-11-20T10:02:15.000Z',
+      content: '<USER_REQUEST>\nFollow-up after reading\n</USER_REQUEST>',
+    },
+  ];
+  await writeFile(transcriptFile, `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`, 'utf-8');
+
+  let proc;
+  try {
+    const started = await startMockSidecar(execDataDir, convId);
+    proc = started.child;
+    const base = `http://127.0.0.1:${started.port}`;
+
+    const m = await (await fetch(`${base}/api/metrics?conversationId=${convId}`)).json();
+    assert.equal(m.ok, true);
+    assert.equal(m.steps.length, 2);
+
+    // Step 1: 4000 tokens over 40s = 100.0 tok/s (NOT 800.0 tok/s from first tool at +5s)
+    assert.equal(m.steps[0].durationSec, 40);
+    assert.equal(m.steps[0].tps, 100);
+
+    // Step 2: historical direct reply followed by USER_INPUT -> unmeasured (no fake 6.7 tok/s)
+    assert.equal(m.steps[1].durationSec, null);
+    assert.equal(m.steps[1].tps, null);
+
+    // Session avg/peak reflects only real measured step (100.0 tok/s)
+    assert.equal(m.summary.avgTps, 100);
+    assert.equal(m.summary.peakTps, 100);
   } finally {
     if (proc) {
       proc.kill();

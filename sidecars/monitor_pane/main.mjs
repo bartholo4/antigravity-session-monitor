@@ -188,7 +188,7 @@ function createIncrementalEntry(convId) {
 
     plannerStepCount: 0,
     plannerSteps: [], // Rolling window (last MAX_STORED_STEPS)
-    pendingPlanner: null, // { stepRef, startMs, outputTokens, rawIndex }
+    pendingPlanner: null, // { stepRef, startMs, outputTokens, rawIndex, expectedTools, seenTools, lastToolMs, observedEndMs }
 
     lastRawType: '',
     lastRawStatus: '',
@@ -215,23 +215,59 @@ function calcDurationAndTps(startMs, endMs, outputTokens) {
   return { durationSec, tps: null, measurable: false };
 }
 
+function closePendingPlanner(entry, endMs) {
+  const p = entry.pendingPlanner;
+  if (!p) return;
+  if (Number.isFinite(endMs)) {
+    const calc = calcDurationAndTps(p.startMs, endMs, p.outputTokens);
+    p.stepRef.durationSec = calc.durationSec !== null ? Number(calc.durationSec.toFixed(1)) : null;
+    p.stepRef.tps = calc.tps !== null ? Number(calc.tps.toFixed(1)) : null;
+    if (calc.measurable) {
+      entry.closedMeasurableOutput += p.outputTokens;
+      entry.closedMeasurableDurSec += calc.durationSec;
+      if (calc.tps > entry.closedPeakTps) entry.closedPeakTps = calc.tps;
+    }
+  }
+  entry.pendingPlanner = null;
+}
+
 function ingestRawStep(entry, s) {
   const rawIdx = entry.rawStepCount++;
 
-  // Close a previously open trailing planner step once any subsequent step brings a valid timestamp.
-  if (entry.pendingPlanner && typeof s?.created_at === 'string') {
-    const nextMs = Date.parse(s.created_at);
-    if (Number.isFinite(nextMs)) {
-      const p = entry.pendingPlanner;
-      const calc = calcDurationAndTps(p.startMs, nextMs, p.outputTokens);
-      p.stepRef.durationSec = calc.durationSec !== null ? Number(calc.durationSec.toFixed(1)) : null;
-      p.stepRef.tps = calc.tps !== null ? Number(calc.tps.toFixed(1)) : null;
-      if (calc.measurable) {
-        entry.closedMeasurableOutput += p.outputTokens;
-        entry.closedMeasurableDurSec += calc.durationSec;
-        if (calc.tps > entry.closedPeakTps) entry.closedPeakTps = calc.tps;
+  // Close a previously open planner step at its actual generation boundary:
+  // - Multi-tool batches stream tool calls sequentially; each GENERIC step's created_at marks
+  //   when that tool call finished streaming, so wait for the N-th (last) GENERIC tool step.
+  // - Ignore interleaved SYSTEM_MESSAGE / EPHEMERAL_MESSAGE / CHECKPOINT notifications mid-batch.
+  // - For direct replies (expectedTools === 0), never measure across USER_INPUT / SYSTEM_MESSAGE
+  //   wait time; preserve live mtime-observed completion if available.
+  if (entry.pendingPlanner) {
+    const p = entry.pendingPlanner;
+    const stepType = typeof s?.type === 'string' ? s.type : '';
+    const stepMs = typeof s?.created_at === 'string' ? Date.parse(s.created_at) : NaN;
+
+    if (p.expectedTools > 0) {
+      if (stepType === 'GENERIC') {
+        p.seenTools++;
+        if (Number.isFinite(stepMs)) {
+          p.lastToolMs = Number.isFinite(p.lastToolMs) ? Math.max(p.lastToolMs, stepMs) : stepMs;
+        }
+        if (p.seenTools >= p.expectedTools) {
+          closePendingPlanner(entry, p.lastToolMs);
+        }
+      } else if (stepType === 'PLANNER_RESPONSE' || stepType === 'USER_INPUT' || stepType === 'ERROR_MESSAGE') {
+        closePendingPlanner(entry, p.lastToolMs);
       }
-      entry.pendingPlanner = null;
+    } else {
+      if (stepType === 'GENERIC') {
+        closePendingPlanner(entry, stepMs);
+      } else if (
+        stepType === 'PLANNER_RESPONSE' ||
+        stepType === 'USER_INPUT' ||
+        stepType === 'SYSTEM_MESSAGE' ||
+        stepType === 'ERROR_MESSAGE'
+      ) {
+        closePendingPlanner(entry, p.observedEndMs);
+      }
     }
   }
 
@@ -324,6 +360,10 @@ function ingestRawStep(entry, s) {
     startMs,
     outputTokens,
     rawIndex: rawIdx,
+    expectedTools: toolInfo.count,
+    seenTools: 0,
+    lastToolMs: NaN,
+    observedEndMs: NaN,
   };
 }
 
@@ -344,7 +384,8 @@ function buildMetricsSnapshot(entry) {
 
   const p = entry.pendingPlanner;
   if (p && p.rawIndex === entry.rawStepCount - 1) {
-    const calc = calcDurationAndTps(p.startMs, entry.mtimeMs, p.outputTokens);
+    const endMs = Number.isFinite(p.observedEndMs) ? p.observedEndMs : entry.mtimeMs;
+    const calc = calcDurationAndTps(p.startMs, endMs, p.outputTokens);
     const provisionalDur = calc.durationSec !== null ? Number(calc.durationSec.toFixed(1)) : null;
     const provisionalTps = calc.tps !== null ? Number(calc.tps.toFixed(1)) : null;
     if (stepsOut.length > 0 && stepsOut[stepsOut.length - 1] === p.stepRef) {
@@ -494,6 +535,14 @@ async function parseTranscriptIncremental(brainDir, convId) {
 
   entry.size = st.size;
   entry.mtimeMs = st.mtimeMs;
+  if (
+    entry.pendingPlanner &&
+    entry.pendingPlanner.expectedTools === 0 &&
+    entry.pendingPlanner.rawIndex === entry.rawStepCount - 1 &&
+    !Number.isFinite(entry.pendingPlanner.observedEndMs)
+  ) {
+    entry.pendingPlanner.observedEndMs = st.mtimeMs;
+  }
   lruSet(parseCache, filePath, entry, MAX_PARSE_CACHE);
   return buildMetricsSnapshot(entry);
 }

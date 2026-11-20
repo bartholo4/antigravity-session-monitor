@@ -1,7 +1,7 @@
 {
   "name": "session-monitor",
   "displayName": "会话状态监控",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "DSH 风格实时会话遥测控制面板：在右侧面板常驻展示上下文引用百分比、前缀缓存命中率、每秒 Token 速率（tok/s）与步级耗时明细。",
   "author": {
     "name": "bartholo4",
